@@ -1,5 +1,5 @@
 import numpy as np, os, psutil, time, traceback
-import random, copy, sys, math   
+import random, copy, sys, math, argparse   
 import matplotlib.pyplot as plt
 from scipy.sparse import csr_matrix
 import hashlib, cPickle as pickle 
@@ -13,14 +13,16 @@ from RLFold.src.misc import save_as_movie, chunks_generator, chunks
 from multiprocessing import Pool
 from functools import partial
 
+import matplotlib
+matplotlib.pyplot.switch_backend('agg')
+
 def yield_conf(configurations):
 	counter = 0 
 	for state in configurations:
 		yield counter, configurations[state]
 		counter += 1 
 
-def worker(config_details, Lx = 20, Ly = 20, verbose = False, draw = False, move_details = False):
-	# Will need to at least import Actions here, so keras junk doesn't get confused.	
+def worker(config_details, Lx = 20, Ly = 20, verbose = False, draw = False, move_details = False):	
 	try:
 		p, config = config_details
 
@@ -104,22 +106,52 @@ def worker(config_details, Lx = 20, Ly = 20, verbose = False, draw = False, move
 		print traceback.format_exc()
 
 if __name__ == "__main__":
+	parser = argparse.ArgumentParser()
+	parser.add_argument('--grid_size', type = int, default = 50,
+						help = 'Length of the grid, default is 1 + length')
+	parser.add_argument('--chain_length', type = int, default = 5,
+						help = 'Length of the chain. Default is 5')
+	parser.add_argument('--cores', type = int, default = psutil.cpu_count(),
+						help = 'Number of cores. Default is {}'.format(psutil.cpu_count()))
+	parser.add_argument('--draw', type = bool, default = False,
+						help = 'Write conf to png. Default is false.')
+	parser.add_argument('--verbose', type = bool, default = False,
+						help = 'Print progress to stdout.')
+	parser.add_argument('--conf_directory', type = str, default = 'examples',
+						help = 'Load configurations from here. Default = ./examples')
+	parser.add_argument('--save_directory', type = str, default = 'images',
+						help = 'Where to save images. Default = ./images')
+	args = parser.parse_args()
 
-	length = int(sys.argv[1])
-	Lx = Ly = 50
-	seq = ''.join(['P' for x in range(length)])
+	chain_length	= int(args.chain_length)
+	grid_size		= int(args.grid_size)
+	cores			= int(args.cores)
+	draw			= bool(args.draw)
+	verbose 		= bool(args.verbose)
+	conf_dir 		= str(args.conf_directory)
+	save_dir 		= str(args.save_directory)
+
+	'''
+	There needs to be a directory already containing a .trj file. 
+	'''
+	if not os.path.isdir(conf_dir):
+		print "No directory called {}. Exiting.".format(conf_dir)
+
+
+	Lx = Ly = grid_size
+	seq = ''.join(['P' for x in range(chain_length)])
 	
-	if length < 12:
-		draw = False
-		verbose = False
-	else:
-		draw = False
-		verbose = False
-
 	'''
 	Load the text files containing the HP-lattice generated configurations
 	'''	
-	with open("examples/{}/0.trj".format(length), "r") as fid:
+	traj_file = "{}/0.trj".format(chain_length)
+	traj_location = os.path.join(conf_dir, traj_file)
+	
+	if not os.path.isfile(traj_location):
+		print "You need to run make_configs.py first. Exiting."
+		sys.exit(1)
+	
+	with open(traj_location, "r") as fid:
 		configurations = {}
 		for k,line in enumerate(fid.readlines()):
 			line = line.strip('\n').strip('[').strip(']').split("), ")
@@ -131,49 +163,59 @@ if __name__ == "__main__":
 	'''
 		Delete any pre-existing trajectory file
 	'''
-	if os.path.isfile('examples/{}/states_trajectory_{}.pkl'.format(length,Lx)):
-		os.remove('examples/{}/states_trajectory_{}.pkl'.format(length,Lx))
+	formatter = '{}/states_trajectory_{}.pkl'.format(chain_length, grid_size)
+	traj_file = os.path.join(conf_dir, formatter)
+	if os.path.isfile(traj_file):
+		os.remove(traj_file)
 
 	######################################################################
 	'''
 		Set up multiprocessing
 	'''
-
-	NCPUS = psutil.cpu_count()
-	if NCPUS > 24: NCPUS = 24
-	_p = Pool(processes=NCPUS)
-	print "Using {} cpus".format(NCPUS)
+	if cores > 24: cores = 24
+	_p = Pool(processes=cores)
+	print "Using {} cpus".format(cores)
 
 	available_move_details = available_moves(Lx,Ly)
-	f = partial(worker, Lx = Lx, Ly = Ly, verbose = verbose, draw = draw, move_details = available_move_details)
+	f = partial(worker, Lx = Lx, Ly = Ly, verbose = verbose, 
+				draw = draw, move_details = available_move_details)
 
 	t0 = time.time()
-	
+
+	'''
+		Find all possible "legal" configurations
+	'''
 	total = 0
 	total_configs = len(configurations.keys())
-
-	size = min(100, total_configs)
-	for chunk in chunks_generator(yield_conf(configurations), size = 100 * NCPUS * size):
-
+	size = 100 * cores * min(100, total_configs)
+	for chunk in chunks_generator(yield_conf(configurations), size = size):
 		for result in _p.imap(f, chunk, chunksize = size):
 			
 			initial_chain,legal_moves = result 
 			
-			with open('examples/{}/states_trajectory_{}.pkl'.format(length,Lx), "a+") as fid:
-				pickle.dump([Lx,Ly,initial_chain,legal_moves],fid,pickle.HIGHEST_PROTOCOL) 
+			with open(traj_file, "a+") as fid:
+				pickle.dump([Lx,Ly,initial_chain,legal_moves],
+							fid,pickle.HIGHEST_PROTOCOL
+							) 
 
 			if (total + 1) % 100 == 0: 
 				print "... working on configuration {} / {}".format(total+1,total_configs)
 
 			total += 1
 
+	'''
+	Save configurations to png, stitch together to make a movie.
+	'''
 	if draw:
 		name = 'L_{}'.format(len(seq))
-		traj_id = '/tmp/{}'.format(name)
-		save_as_movie(traj_id, traj_id)
-		os.system('mv {}*.png images'.format(traj_id))
-		#os.system('rm {}*.png'.format(traj_id))
-		os.system('mv {}.mp4 images/{}.mp4'.format(traj_id,name))
+		movie_path = os.path.join(save_dir, str(chain_length))
+		traj_id = os.path.join(movie_path, name)
+
+		for _dir in [save_dir, movie_path]:
+			if not os.path.isdir(_dir):
+				os.makedirs(_dir)
+
+		save_as_movie(traj_id, traj_id, verbose = verbose)
 
 	tf = float("%0.3f" % (time.time() - t0))
 	print "Finished sequence {} in {} s, total unique states {}".format(seq,tf,total)

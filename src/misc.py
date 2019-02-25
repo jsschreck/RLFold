@@ -26,17 +26,17 @@ class CustomDictionary:
 		else:
 			self.dict[key].append(data)
 # ---------------------------------------------------------------------------------
-def save_as_movie(img_prefix, save_filename):
-	# -r ~ number of frames per second
+def save_as_movie(img_prefix, save_filename, verbose = False):
 	total_pngs = len(glob.glob('{}_*.png'.format(img_prefix)))
 	frames_per_second = int(total_pngs / 60.) + 1
 
-	#print 'Total configs:', total_pngs, '| Frames per second:', frames_per_second
-	#print 'Total length of movie:', total_pngs * frames_per_second
+	if verbose:
+		print 'Total configs:', total_pngs, '| Frames per second:', frames_per_second
+		print 'Total length of movie:', total_pngs * frames_per_second
 
-	command = "ffmpeg -r {} -i {}_%d.png -vcodec mpeg4 -pix_fmt bgra -y {}.mp4".format(frames_per_second,
-			  img_prefix,save_filename)
-	#os.system(command)
+	command = "ffmpeg -r {} -i {}_*.png -vcodec mpeg4 -pix_fmt bgra -y {}.mp4".format(frames_per_second,
+			  img_prefix, save_filename)
+
 	x = subprocess.Popen(command,shell=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
 	x.communicate()
 # ---------------------------------------------------------------------------------
