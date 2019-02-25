@@ -33,7 +33,7 @@ This implementation is currently limited to two-dimensional chains. The size of 
 
 A residue in a chain may execute one of the following moves: (i) an end-move or (ii) crank-shaft.
 
-<img src="images/moves.png" alt="drawing" width="1205pt"/>
+<img src="images/moves.png" alt="drawing" width="500pt"/>
 
 
 <!--Note that anytime a move is performed, the configuration is ``standardized'' in the following way. Consider a residue moving from (x_i, y_i) to (x_f, y_f). The chain is then translated such that the first and second residue (measured from the same end of the chain) are repositioned at (0,0) and (1,0). Then, the first non-collinear residue thereafter is placed in the first quadrant, and the rest of the chain is moved accordingly. 
@@ -55,16 +55,16 @@ sh make_config.sh
 cd .. 
 ```
 
-Next, sample all configurations that are accessible via the move set --
+Next, sample all configurations that are accessible via the move set
 
 ```
-python config_generator.py --length 5 --save_dir examples/5 --draw True
+python config_generator.py --chain_length 5 --grid_size 6 --conf_dir examples --draw True --save_dir images
 ```
 
-which should print out 13. A file containing the configurations is saved in the default directory, here /examples/5.
+which should print out 13. A file containing the configurations is saved in the default directory, here /examples/5, along with configuration images and a movie.
 
-Finally, compute the optimal policy using value iteration -- 
+Finally, compute the optimal policy using value iteration
 
 ```
-python config_generator.py --length 5 --save_dir examples/5 --draw True
+python value_iteration.py
 ```
