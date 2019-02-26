@@ -1,4 +1,4 @@
-<style TYPE="text/css">
+<!--<style TYPE="text/css">
 code.has-jax {font: inherit; font-size: 100%; background: inherit; border: inherit;}
 </style>
 <script type="text/x-mathjax-config">
@@ -15,8 +15,7 @@ MathJax.Hub.Queue(function() {
     }
 });
 </script>
-<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.4/MathJax.js?config=TeX-AMS_HTML-full"></script>
-
+<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.4/MathJax.js?config=TeX-AMS_HTML-full"></script>-->
 
 # RL-Fold
 
@@ -41,11 +40,11 @@ A residue in a chain may execute one of the following moves: (i) an end-move or 
 
 Objective
 -----------------------------------------------------------------------------------------------
-Find a policy`$\pi^*$`that folds an HP chain into a ground state in as few moves as possible. The ground state(s) of a chain having some sequence are the configurations having the maximum possible number of hydrogen bonds.
+Find a policy $\pi^*$ that folds an HP chain into a ground state in as few moves as possible. The ground state(s) of a chain having some sequence are the configurations having the maximum possible number of hydrogen bonds.
 
 Options
 -----------------------------------------------------------------------------------------------
-Consider a simple HP chain with sequence HHHHH. 
+Consider a simple HP chain with sequence HHPHH. 
 
 Generate a configuration for the chain (relies on HPSandbox) -- 
 
@@ -58,7 +57,7 @@ cd ..
 Next, sample all configurations that are accessible via the move set
 
 ```
-python config_generator.py --chain_length 5 --grid_size 6 --conf_dir examples --draw True --save_dir images
+python config_generator.py --chain_length 5 --grid_size 7 --conf_dir examples --draw True
 ```
 
 which should print out 13. A file containing the configurations is saved in the default directory, here /examples/5, along with configuration images and a movie.
@@ -66,5 +65,5 @@ which should print out 13. A file containing the configurations is saved in the 
 Finally, compute the optimal policy using value iteration
 
 ```
-python value_iteration.py
+python iteration.py -s HHPHH --draw True --verbose True
 ```

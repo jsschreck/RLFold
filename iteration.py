@@ -1,5 +1,5 @@
 import numpy as np, os, psutil, copy, random, matplotlib, time  
-import random, copy, sys, math, itertools  
+import random, copy, sys, math, itertools, argparse  
 from scipy.sparse import csr_matrix
 import hashlib, cPickle as pickle 
 
@@ -125,7 +125,7 @@ class Iteration:
 				break
 		return v
 
-	def policy_iteration(self):
+	def policy_iteration(self, max_iterations = 200000):
 		_policy = {}
 		for key in self.states:
 			if states[key]['bonds'] == self.max_bonds:
@@ -134,7 +134,6 @@ class Iteration:
 			selection = random.choice(actions)
 			_policy[key] = selection 
 
-		max_iterations = 200000
 		for i in range(max_iterations):
 			old_policy_v = self.compute_policy_v(_policy)
 			new_policy = self.extract_policy(old_policy_v)
@@ -186,23 +185,25 @@ class Iteration:
 					trajectories[starting_state] = trajectory
 
 		J = [x[1] for x in total_state_rewards.values()]
-		print "Average trajectory length:", np.mean(J)
-		print "Shortest trajectory length:", min(J)
-		print "Longest trajectory length:", max(J)
+		
+		if self.verbose:
+			print "Average trajectory length:", np.mean(J)
+			print "Shortest trajectory length:", min(J)
+			print "Longest trajectory length:", max(J)
 
 		if draw:
 			t0 = time.time()
 			if self.verbose:
-				print "Making movies for the top-{} longest trajectories ... ".format(top)
+				print "Making movies for the top-{} configurations".format(top)
 			T = Trajectory()
 			for total,(starting_state,trajectory) in enumerate(sorted(trajectories.items(), key = lambda x: len(x[1]), reverse = True)[:top]):
 				N = len(trajectory)
-				name = '{}_{}_{}_{}'.format(seq,total,N-1,starting_state)
+				name = '{}_{}_{}_{}'.format(sequence,total,N-1,starting_state)
 				for step,key in enumerate(trajectory):
 					Lx = self.states[key]['Lx']
 					Ly = self.states[key]['Ly']
 					initial_chain = self.states[key]['chain']
-					C = Chain(seq, Lx = Lx, Ly = Lx)
+					C = Chain(sequence, Lx = Lx, Ly = Lx)
 					C.load_configuration(initial_chain)
 					initial_chain = C.chain 
 					initial_grid = C.grid
@@ -210,9 +211,9 @@ class Iteration:
 					string_id = '{}_{}'.format(name,step)
 					T.draw(initial_chain, initial_grid, initial_bonds_dict, key, string_id, Lx, Ly)
 				traj_id = '/tmp/{}'.format(name)
-				save_as_movie(traj_id, traj_id)
+				save_as_movie(traj_id, traj_id, by_id = True)
 				os.system('rm {}*.png'.format(traj_id))
-				os.system('mv {}.mp4 images/{}/{}.mp4'.format(traj_id,length,name))
+				os.system('mv {}.mp4 images/{}/{}.mp4'.format(traj_id,chain_length,name))
 			if self.verbose:
 				print "... finished in {} s".format(time.time()-t0)
 			
@@ -221,31 +222,71 @@ class Iteration:
 		return total_state_rewards, ave_value, traj_length, N 
 	 
 if __name__ == "__main__":
+	parser = argparse.ArgumentParser()
+	parser.add_argument('-s', '--sequence', type = str, default = 'HHHHH',
+						help = 'Chain sequence. Default: HHHHH')
+	parser.add_argument('--grid_size', type = int, default = 50,
+						help = 'Length of the grid, default is 1 + length')
+	parser.add_argument('--cores', type = int, default = psutil.cpu_count(),
+						help = 'Number of cores. Default is {}'.format(psutil.cpu_count()))
+	parser.add_argument('--draw', type = bool, default = False,
+						help = 'Write conf to png. Default is false.')
+	parser.add_argument('--verbose', type = bool, default = False,
+						help = 'Print progress to stdout.')
+	parser.add_argument('--conf_directory', type = str, default = 'examples',
+						help = 'Load configurations from here. Default = ./examples')
+	parser.add_argument('--save_directory', type = str, default = 'images',
+						help = 'Where to save images. Default = ./images')
+	parser.add_argument('--max_episode_length', type = int, default = 1000,
+						help = 'Stop trying to fold after X steps. Default = 1000')
+	parser.add_argument('--gamma', type = float, default = 0.99,
+						help = 'Reward decay factor. Default = 0.99')
+	parser.add_argument('--top_k', type = int, default = 25,
+						help = 'Top-k configs to make movies for. Default = 25')
+	args = parser.parse_args()
 
-	seq = str(sys.argv[1])
-	length = len(seq)
+	sequence 		= str(args.sequence)
+	chain_length	= len(sequence)
+	grid_size		= chain_length + 2 #int(args.grid_size)
+	
+	cores			= int(args.cores)
+	draw			= bool(args.draw)
+	verbose 		= bool(args.verbose)
+	conf_dir 		= str(args.conf_directory)
+	save_dir 		= str(args.save_directory)
 
-	#N = length + 2      # grid size
-	N = 50
-	topK = 25
-	gamma = 0.99
-	max_episode_length = 1000
+	gamma 				= float(args.gamma)
+	max_episode_length 	= int(args.max_episode_length)
+	topK 				= int(args.top_k)
 
-	draw = False
-	verbose = True
 	use_neural_model = False
+
+	#########################
 
 	'''
 		Set up filenames
 	'''
-	load_states_fileName  = 'examples/{}/data/states_trajectory_{}.pkl'.format(length,N)
-	save_states_fileName  = 'examples/{}/states/states_{}.pkl'.format(length,N)
-	save_optimal_fileName = 'examples/{}/states/{}.pkl'.format(length,seq)
-	save_episode_fileName = 'examples/{}/episodes/{}.pkl'.format(length,seq)
-	logger_fileName 	  = 'logs/logger_{}.txt'.format(seq)
-	save_training_states  = "fps/all_states_{}.pkl".format(length)
-	save_testing_states   = "fps/test_{}.pkl".format(length)
+	chain_dir = os.path.join(conf_dir, '{}'.format(chain_length))
+	episodes_dir = os.path.join(chain_dir, 'episodes')
+	states_dir = os.path.join(chain_dir, 'states')
+	logs_dir = os.path.join(chain_dir, 'logs')
+	fps_dir = os.path.join(chain_dir, 'fps')
+
+	load_states_fileName  = os.path.join(chain_dir,'states_trajectory.pkl')
+	save_states_fileName  = os.path.join(states_dir,'states.pkl')
+	save_optimal_fileName = os.path.join(states_dir,'{}.pkl'.format(sequence))
+	save_episode_fileName = os.path.join(episodes_dir,'{}.pkl'.format(sequence)) 
+	logger_fileName 	  = os.path.join(logs_dir, 'logger_{}.txt'.format(sequence))
+	save_training_states  = os.path.join(fps_dir, 'all_states_{}.pkl'.format(chain_length))
+	save_testing_states   = os.path.join(fps_dir, 'test_{}.pkl'.format(chain_length))
 	
+	'''
+		Check if directories exist. If not, create them
+	'''
+	for working_dir in [episodes_dir,states_dir,logs_dir,fps_dir]:
+		if not os.path.isdir(working_dir):
+			os.makedirs(working_dir)
+
 	'''
 		Delete pre-existing files
 	'''
@@ -254,7 +295,7 @@ if __name__ == "__main__":
 			os.system('rm {}'.format(_fn))
 
 	with open(logger_fileName, "a+") as fid:
-		fid.write('Working on sequence {}\n'.format(seq))
+		fid.write('Working on sequence {}\n'.format(sequence))
 	
 	'''
 		Load from trajectory file containing unique states for length N
@@ -274,16 +315,18 @@ if __name__ == "__main__":
 		for q, conf_details in enumerate(states_generator):
 			Lx, Ly, saved_chain, legal_moves = conf_details
 
-			Lx = N 
-			Ly = N 
+			Lx = grid_size
+			Ly = grid_size
 			# Get move details for this lattice
 			if not q:
 				available_move_details = available_moves(Lx,Ly)
 				print "Possible moves:", available_move_details[0]
 
 			T = Trajectory()
-			A = Actions(Lx = Lx, Ly = Ly, available = available_move_details, use_neural_model = use_neural_model)
-			C = Chain(seq, Lx = Lx, Ly = Ly)
+			A = Actions(Lx = Lx, Ly = Ly, available = available_move_details, 
+						use_neural_model = use_neural_model
+						)
+			C = Chain(sequence, Lx = Lx, Ly = Ly)
 			
 			C.load_configuration(saved_chain)
 			initial_chain = C.chain
@@ -326,7 +369,7 @@ if __name__ == "__main__":
 		Exit if there are no states with H-bonds.
 	'''
 	if not max_bonds:
-		print "{} cannot form any bonds. Exiting.".format(seq)
+		print "{} cannot form any bonds. Exiting.".format(sequence)
 		sys.exit()
 
 	'''
@@ -378,66 +421,60 @@ if __name__ == "__main__":
 		with open(save_testing_states, "a+") as gid:
 			for state in unique_states:
 				State = unique_states[state]
-				if State['bonds'] == max_bonds: continue
-
+				if State['bonds'] == max_bonds: 
+					continue
 				if random.random() >= 0.0:
 					State['state'].save_sparse(fid)
 					train_total += 1 
 				else:
 					State['state'].save_sparse(gid)
 					test_total += 1
+
 	print "Saved {} train states to {}".format(train_total, save_training_states)
 	print "Saved {} test states to {}".format(test_total, save_testing_states)
-	sys.exit()
 
-	#for key in unique_states:
-	#	try:
-	#		_r = unique_states[key]['state'].rewards
-	#		print key, v_star[key], np.where(np.isfinite(_r)), _r[np.where(np.isfinite(_r))]
-	#	except Exception as E:
-	#		pass
-	'''
-	A = Actions(Lx = N, Ly = N, available = available_move_details, use_neural_model = True)
-	A.states = unique_states
-	A.train(0, 16, 100, split = 0.2, max_bonds = max_bonds)
-	sys.exit()
-	'''
-
-	if verbose:
-		for key,value in sorted(v_star.items(), key = lambda x: x[1], reverse = True):
-			print key, value
-		print "Average state value:", np.mean(v_star.values())
-		#for key,value in sorted(q_star.items(), key = lambda x: x[1], reverse = True):
-		#	print key, value['rewards']
-			#print "Average state-action value:", np.mean(q_star['rewards'].values())
+	# if verbose:
+	# 	print "State values"
+	# 	for key,value in sorted(v_star.items(), key = lambda x: x[1], reverse = True):
+	# 		print key, value
+	# 	print "State-action values"
+	# 	for key,value in sorted(q_star.items(), key = lambda x: x[1], reverse = True):
+	# 		print key, np.mean(value['rewards'])
 	
 	'''
 		Write stats to logger
 	'''
 	with open(logger_fileName, "a+") as fid:
-		if verbose:
-			_t_ = float("%0.3f" % (tf - t0))
-			print '... which took {} s'.format(_t_)
-		fid.write('... which took {} s\n'.format(_t_))
+		_t_ = float("%0.3f" % (tf - t0))
+		printer = '... which took {} s'.format(_t_)
+		if verbose: print printer
+		fid.write(printer + '\n')
 
 	'''
 		Run 1 episode for all of the unique states using the optimal policy
 	'''
-	results = env.episode(optimal_policy, draw = draw, total_runs = 1000, top = topK, max_episode_length = max_episode_length)
+	results = env.episode(optimal_policy, draw = draw, total_runs = 1000, 
+							top = topK, max_episode_length = max_episode_length
+						)
 	total_state_rewards, ave_value, traj_length, N = results
-	results = sorted(total_state_rewards.items(), key = lambda x: (x[1][0],x[1][1]), reverse = True)
+	
+	results = sorted(total_state_rewards.items(), 
+						key = lambda x: (x[1][0],x[1][1]), reverse = True
+					)
 
 	'''
 		Write episode results to logger
 	'''
 	with open(logger_fileName, "a+") as fid:
 		for key, result in results:
-			#if verbose:
-			#	print key, result[0], result[1]
 			fid.write('{} {} {}\n'.format(key, result[0], result[1]))
-		#if verbose:
-			#print "Average state value:", ave_value
-			#print "Average trajectory length:", traj_length 
+			if verbose:
+				print key, result[0], result[1]
+		
+		if verbose:
+			print "Average state value:", ave_value
+			print "Average trajectory length:", traj_length 
+		
 		fid.write("Average state value: {}\n".format(ave_value))
 		fid.write("Average trajectory length: {}\n".format(traj_length))
 
@@ -449,7 +486,7 @@ if __name__ == "__main__":
 			for state in unique_states:
 				if state in v_star:
 					pickle.dump([v_star[state],q_star[state],optimal_policy[state]],gid,pickle.HIGHEST_PROTOCOL)
-				#if 'P' not in seq: 
+				#if 'P' not in sequence: 
 					# Only need to save this once, so only save when HHHH ... HH
 				pickle.dump([state,unique_states[state]],fid,pickle.HIGHEST_PROTOCOL)
 	
