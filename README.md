@@ -1,4 +1,4 @@
-# RL-Fold
+# RLFold
 
 Fold 2D HP chains using reinforcement learning. A work in progress.
 
